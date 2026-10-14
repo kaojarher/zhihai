@@ -3,6 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- PWA -->
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#2563eb">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="智海AI">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
     <title>智海 AI - 本土化智慧學習平台</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -85,6 +94,9 @@
 
         <!-- 底部設定與資料管理 -->
         <div class="p-4 border-t border-slate-100 dark:border-slate-700 space-y-2">
+            <button id="pwa-install-sidebar" onclick="installPwa()" class="hidden w-full items-center px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand-500 text-white hover:bg-brand-600 shadow-sm transition">
+                <i class="fa-solid fa-download w-6 mr-2"></i>安裝智海 AI App
+            </button>
             <button onclick="openSettingsModal()" class="w-full flex items-center px-4 py-2.5 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
                 <i class="fa-solid fa-gear w-6 mr-2"></i>系統與 LLM 設定
             </button>
@@ -389,6 +401,13 @@
                         </label>
                     </div>
                 </div>
+            </div>
+
+            <!-- 安裝成 App (PWA) -->
+            <div class="pt-4 border-t border-slate-100 dark:border-slate-700">
+                <label class="block text-sm font-semibold mb-2"><i class="fa-solid fa-mobile-screen-button text-brand-500 mr-2"></i>安裝成 App（電腦／Android／iOS）</label>
+                <button id="pwa-install-btn" onclick="installPwa()" class="hidden px-4 py-2 bg-brand-500 text-white rounded-xl text-xs font-semibold hover:bg-brand-600 transition mb-2"><i class="fa-solid fa-download mr-1"></i>安裝智海 AI</button>
+                <p id="pwa-status" class="text-xs text-slate-500 whitespace-pre-wrap"></p>
             </div>
 
             <!-- 請作者喝一杯拿鐵 -->
@@ -1880,6 +1899,63 @@
             };
             reader.readAsText(file);
         }
+    </script>
+    <!-- PWA：Service Worker 註冊與安裝按鈕 -->
+    <script>
+        (function () {
+            let deferredInstall = null;
+            const isStandalone = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+            const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+            const swOk = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            const $ = id => document.getElementById(id);
+
+            function renderPwaStatus() {
+                const btn = $('pwa-install-btn'), side = $('pwa-install-sidebar'), st = $('pwa-status');
+                if (!st) return;
+                const canPrompt = !!deferredInstall && !isStandalone();
+                btn.classList.toggle('hidden', !canPrompt);
+                side.classList.toggle('hidden', !canPrompt);
+                side.classList.toggle('flex', canPrompt);
+                let msg;
+                if (isStandalone()) msg = '✅ 目前以 App 模式執行。';
+                else if (location.protocol === 'file:') msg = '⚠️ 以 file:// 開啟無法安裝。請部署到 https 網站，或以 http://localhost 開啟本頁。';
+                else if (!swOk) msg = '⚠️ 需要 https 網址（或 localhost）才能安裝成 App。';
+                else if (canPrompt) msg = '按上方按鈕即可安裝，之後可從桌面／主畫面直接開啟，並支援離線開啟介面。';
+                else if (isIOS) msg = 'iPhone／iPad：請用 Safari 點「分享」→「加入主畫面」。';
+                else msg = '若網址列沒有安裝圖示：Chrome／Edge 請從選單選「安裝智海 AI」或「加入主畫面」；Safari（Mac）選「檔案 → 加入 Dock」。';
+                st.textContent = msg;
+            }
+
+            window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstall = e; renderPwaStatus(); });
+            window.addEventListener('appinstalled', () => { deferredInstall = null; renderPwaStatus(); if (window.toast) toast('已安裝智海 AI，可從桌面或主畫面開啟。'); });
+
+            window.installPwa = async function () {
+                if (deferredInstall) {
+                    deferredInstall.prompt();
+                    try { await deferredInstall.userChoice; } catch (e) {}
+                    deferredInstall = null;
+                    renderPwaStatus();
+                } else {
+                    if (typeof openSettingsModal === 'function') openSettingsModal();
+                    renderPwaStatus();
+                }
+            };
+
+            if ('serviceWorker' in navigator && swOk) {
+                window.addEventListener('load', () => {
+                    navigator.serviceWorker.register('sw.js').then(reg => {
+                        reg.addEventListener('updatefound', () => {
+                            const nw = reg.installing;
+                            if (!nw) return;
+                            nw.addEventListener('statechange', () => {
+                                if (nw.state === 'installed' && navigator.serviceWorker.controller && window.toast) toast('智海 AI 已有新版本，關閉後重新開啟即可套用。', 8000);
+                            });
+                        });
+                    }).catch(err => console.warn('Service Worker 註冊失敗：', err));
+                });
+            }
+            window.addEventListener('DOMContentLoaded', renderPwaStatus);
+        })();
     </script>
 </body>
 </html>
