@@ -274,7 +274,7 @@
                         <div class="flex items-start space-x-3">
                             <div class="w-8 h-8 rounded-full bg-brand-500 text-white flex items-center justify-center text-xs shrink-0"><i class="fa-solid fa-robot"></i></div>
                             <div class="custom-card p-4 rounded-2xl rounded-tl-none border border-slate-200 dark:border-slate-700 text-sm max-w-lg shadow-sm">
-                                您好！我是您的智海 AI 學習導師。請先到右上角「設定」填入 API Key 與端點，再開始提問。
+                                您好！我是您的智海 AI 學習導師。預設使用 Puter AI（免 API Key）；第一次提問時會跳出 Puter 登入視窗，登入後即可開始。也可到右上角「設定」改用其他模型。
                             </div>
                         </div>
                     </div>
@@ -333,6 +333,7 @@
                         <h4 id="conn-form-title" class="text-sm font-bold">新增連線</h4>
                         <input type="text" id="conn-name" placeholder="連線名稱，例如：我的 Ollama、公司 LiteLLM" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-sm">
                         <select id="conn-type" onchange="onConnTypeChange()" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-sm">
+                            <option value="puter">Puter AI（免 API Key・登入 Puter 帳號即可）</option>
                             <option value="ollama">Ollama 本地端</option>
                             <option value="openai">OpenAI / OpenAI 相容 (LM Studio、vLLM、LiteLLM…)</option>
                             <option value="anthropic">Anthropic Claude</option>
@@ -538,7 +539,9 @@
         }
 
         // ===== 多組 LLM 連線管理 =====
+        const PUTER_JS_URL = 'https://js.puter.com/v2/';
         const PROVIDER_TYPES = {
+            puter:     { label: 'Puter AI（免 API Key）', endpoint: PUTER_JS_URL,                         model: 'gpt-5.4-nano' },
             openai:    { label: 'OpenAI / 相容',    endpoint: 'https://api.openai.com/v1',                 model: 'gpt-4o' },
             anthropic: { label: 'Anthropic Claude', endpoint: 'https://api.anthropic.com',                 model: 'claude-sonnet-4-6' },
             gemini:    { label: 'Google Gemini',    endpoint: 'https://generativelanguage.googleapis.com', model: 'gemini-2.5-flash' },
@@ -551,7 +554,7 @@
         // 舊版單一設定 → 轉成連線清單
         function migrateConnections() {
             if (!Array.isArray(appData.connections)) appData.connections = [];
-            if (appData.connections.length === 0 && (appData.apiEndpoint || appData.selectedLLM)) {
+            if (appData.connections.length === 0 && (appData.apiKey || /^Ollama/.test(appData.selectedLLM || ''))) {
                 const old = appData.selectedLLM || '';
                 const type = old.startsWith('Ollama') ? 'ollama'
                            : old.startsWith('Claude') ? 'anthropic'
@@ -564,6 +567,17 @@
                     model: appData.apiModel || PROVIDER_TYPES[type].model,
                     apiKey: appData.apiKey || ''
                 });
+            }
+            // 預設連線：Puter AI（只在第一次植入；若使用者目前沒有可用連線，就設為使用中）
+            if (!appData.puterSeeded) {
+                appData.puterSeeded = true;
+                if (!appData.connections.some(c => c.type === 'puter')) {
+                    appData.connections.unshift({ id: 'c_puter_default', name: 'Puter AI（預設・免 API Key）', type: 'puter', endpoint: PUTER_JS_URL, model: PROVIDER_TYPES.puter.model, apiKey: '' });
+                }
+                const act = appData.connections.find(c => c.id === appData.activeConnId);
+                const local = x => /localhost|127\.0\.0\.1/.test(x.endpoint || '');
+                const unusable = !act || (['openai', 'anthropic', 'gemini'].includes(act.type) && !act.apiKey && !local(act));
+                if (unusable) appData.activeConnId = 'c_puter_default';
             }
             if (!appData.connections.some(c => c.id === appData.activeConnId)) {
                 appData.activeConnId = appData.connections.length ? appData.connections[0].id : null;
@@ -608,7 +622,7 @@
                 <div class="flex items-center justify-between p-3 rounded-xl border ${isActive ? 'border-brand-500 bg-brand-50/50 dark:bg-slate-800/50' : 'border-slate-200 dark:border-slate-700'}">
                     <div class="min-w-0 mr-2">
                         <div class="text-sm font-bold truncate">${escapeHtml(c.name)} ${isActive ? '<span class="text-xs font-semibold text-brand-500 ml-1">使用中</span>' : ''}</div>
-                        <div class="text-xs text-slate-400 truncate">${PROVIDER_TYPES[c.type].label}・${escapeHtml(c.model)}・${c.apiKey ? '已設定金鑰' : '無金鑰'}</div>
+                        <div class="text-xs text-slate-400 truncate">${PROVIDER_TYPES[c.type].label}・${escapeHtml(c.model)}・${c.type === 'puter' ? '登入 Puter 帳號即可使用' : (c.apiKey ? '已設定金鑰' : '無金鑰')}</div>
                         <div class="text-xs text-slate-400 truncate">${escapeHtml(c.endpoint)}</div>
                     </div>
                     <div class="flex items-center space-x-1 shrink-0">
@@ -624,6 +638,7 @@
             const d = PROVIDER_TYPES[document.getElementById('conn-type').value];
             document.getElementById('conn-endpoint').value = d.endpoint;
             document.getElementById('conn-model').value = d.model;
+            if (document.getElementById('conn-type').value === 'puter') document.getElementById('conn-test-result').innerText = 'Puter AI 不需要 API Key。按「測試連線」會跳出 Puter 登入視窗，登入後即可使用（每位使用者有免費月額度，用量計在自己的 Puter 帳號）。請允許瀏覽器彈出視窗。';
         }
 
         function readConnForm() {
@@ -1697,6 +1712,39 @@
             return sys;
         }
 
+        // ===== Puter AI (Puter.js：免 API Key，使用者以 Puter 帳號登入，用量計在自己帳號) =====
+        function puterText(r) {
+            if (typeof r === 'string') return r;
+            const c = r && r.message && r.message.content;
+            if (typeof c === 'string') return c;
+            if (Array.isArray(c)) return c.map(b => (b && b.text) || '').join('');
+            return (r && r.text) ? String(r.text) : '';
+        }
+        function puterErr(e) {
+            return new Error((e && ((e.error && e.error.message) || e.message || (typeof e === 'string' ? e : ''))) || 'Puter 發生未知錯誤');
+        }
+        async function ensurePuter() {
+            await loadScript(PUTER_JS_URL).catch(() => { throw new Error('無法載入 Puter 套件，請確認網路可連線至 js.puter.com。'); });
+            if (!window.puter || !window.puter.ai) throw new Error('Puter 套件載入失敗，請重新整理頁面。');
+            try {
+                if (!(await window.puter.auth.isSignedIn())) await window.puter.auth.signIn();
+            } catch (e) {
+                throw new Error('尚未登入 Puter：請允許瀏覽器彈出視窗，並在「設定 → 測試連線」完成登入。（' + puterErr(e).message + '）');
+            }
+        }
+        async function callPuter(messages, conn, system, opts) {
+            await ensurePuter();
+            try {
+                const r = await window.puter.ai.chat(
+                    [{ role: 'system', content: system }, ...messages],
+                    { model: conn.model || PROVIDER_TYPES.puter.model, normalize: true, max_tokens: opts.maxTokens || undefined }
+                );
+                const out = puterText(r);
+                if (!out) throw new Error('模型回傳內容為空。');
+                return out;
+            } catch (e) { throw puterErr(e); }
+        }
+
         async function callLLM(messages, conn, opts = {}) {
             if (!conn) throw new Error('尚未設定任何 LLM 連線，請到「設定」新增一組連線。');
             const provider = conn.type;
@@ -1704,6 +1752,7 @@
             const base = (conn.endpoint || '').replace(/\/+$/, '');
             const model = conn.model;
             const system = opts.system || (opts.skipDocs ? '你是連線測試助理。' : buildSystemPrompt(opts.query));
+            if (provider === 'puter') return callPuter(messages, conn, system, opts);
             let url, headers = { 'Content-Type': 'application/json' }, body, extract;
 
             if (provider === 'anthropic') {
